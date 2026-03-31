@@ -1,0 +1,174 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>流式渲染节奏对比：微任务 vs 宏任务</title>
+    <style>
+      .container {
+        font-family: monospace;
+        font-size: 20px;
+        margin: 20px;
+        padding: 10px;
+        border: 1px solid #ccc;
+        min-height: 200px;
+      }
+      button {
+        margin: 5px;
+        padding: 8px 16px;
+      }
+      .log {
+        font-size: 12px;
+        color: gray;
+        margin-top: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <h3>流式 Token 渲染对比</h3>
+    <div>
+      <button id="directBtn">直接同步更新</button>
+      <button id="microBtn">Promise.then 微任务</button>
+      <button id="macroBtn">setTimeout 宏任务</button>
+      <button id="stopBtn">停止</button>
+    </div>
+    <div class="container" id="output"></div>
+    <div class="log" id="log"></div>
+
+    <script>
+      const output = document.getElementById("output");
+      const logDiv = document.getElementById("log");
+      let intervalId = null;
+      let tokenIndex = 0;
+      const TOKEN_STRING =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+      function log(msg) {
+        const p = document.createElement("div");
+        p.textContent = msg;
+        logDiv.appendChild(p);
+        logDiv.scrollTop = logDiv.scrollHeight;
+      }
+
+      function stopStream() {
+        if (intervalId) clearInterval(intervalId);
+        intervalId = null;
+        log("流式已停止");
+      }
+
+      // 通用流式发生器：每 10ms 产生一个 token，直到 30 个 token 或主动停止
+      function startStream(updateFn, modeName) {
+        stopStream();
+        tokenIndex = 0;
+        output.innerHTML = "";
+        logDiv.innerHTML = "";
+        log(`开始流式模拟 (${modeName})，token 间隔 10ms`);
+
+        intervalId = setInterval(() => {
+          if (tokenIndex >= TOKEN_STRING.length) {
+            stopStream();
+            log("流式结束");
+            return;
+          }
+          const token = TOKEN_STRING[tokenIndex];
+          tokenIndex++;
+          // 记录当前时间（毫秒精度）
+          const now = performance.now();
+          log(`[${now.toFixed(2)}] 收到 token: ${token}，调用更新函数`);
+
+          // 调用不同的更新策略
+          updateFn(token, now);
+        }, 10);
+      }
+
+      // 1. 直接同步更新 DOM
+      function directUpdate(token, timestamp) {
+        output.textContent += token;
+        const after = performance.now();
+        log(
+          `[${after.toFixed(2)}] 直接更新 DOM 完成，耗时 ${(after - timestamp).toFixed(2)}ms`,
+        );
+      }
+
+      // 2. 微任务更新：Promise.then
+      function microTaskUpdate(token, timestamp) {
+        Promise.resolve().then(() => {
+          output.textContent += token;
+          const after = performance.now();
+          log(
+            `[${after.toFixed(2)}] 微任务更新 DOM 完成，耗时 ${(after - timestamp).toFixed(2)}ms`,
+          );
+        });
+      }
+
+      // 3. 宏任务更新：setTimeout
+      function macroTaskUpdate(token, timestamp) {
+        setTimeout(() => {
+          output.textContent += token;
+          const after = performance.now();
+          log(
+            `[${after.toFixed(2)}] 宏任务更新 DOM 完成，耗时 ${(after - timestamp).toFixed(2)}ms`,
+          );
+        }, 0);
+      }
+
+      // 模拟一个消息包含多个 token（例如 SSE 一次收到 5 个字符）
+      function startBatchStream(updateFn, modeName) {
+        // 每 50ms 发送一批，每批 5 个 token
+        const BATCH_SIZE = 5;
+        let batchIndex = 0;
+        stopStream();
+        output.innerHTML = "";
+        logDiv.innerHTML = "";
+        log(
+          `开始批量流式 (${modeName})，每批 ${BATCH_SIZE} 个 token，间隔 50ms`,
+        );
+
+        intervalId = setInterval(() => {
+          if (batchIndex * BATCH_SIZE >= TOKEN_STRING.length) {
+            stopStream();
+            return;
+          }
+          const batch = TOKEN_STRING.slice(
+            batchIndex * BATCH_SIZE,
+            (batchIndex + 1) * BATCH_SIZE,
+          );
+          batchIndex++;
+          log(
+            `[${performance.now().toFixed(2)}] 收到一批 token: ${batch.split("").join(",")}`,
+          );
+
+          if (modeName === "micro") {
+            // 为每个 token 单独创建微任务
+            for (let ch of batch) {
+              Promise.resolve().then(() => {
+                output.textContent += ch;
+                log(`[${performance.now().toFixed(2)}] 微任务更新: ${ch}`);
+              });
+            }
+          } else if (modeName === "macro") {
+            for (let ch of batch) {
+              setTimeout(() => {
+                output.textContent += ch;
+                log(`[${performance.now().toFixed(2)}] 宏任务更新: ${ch}`);
+              }, 0);
+            }
+          } else {
+            // 同步直接更新
+            for (let ch of batch) {
+              output.textContent += ch;
+              log(`[${performance.now().toFixed(2)}] 同步更新: ${ch}`);
+            }
+          }
+        }, 50);
+      }
+      // 绑定按钮
+      document.getElementById("directBtn").onclick = () =>
+      startBatchStream(directUpdate, "直接同步");
+      document.getElementById("microBtn").onclick = () =>
+      startBatchStream(microTaskUpdate, "Promise.then 微任务");
+      document.getElementById("macroBtn").onclick = () =>
+      startBatchStream(macroTaskUpdate, "setTimeout 宏任务");
+      document.getElementById("stopBtn").onclick = () => stopStream();
+    </script>
+  </body>
+</html>
